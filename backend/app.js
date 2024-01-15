@@ -1,10 +1,20 @@
 const puppeteer = require('puppeteer');
+const { MongoClient } = require('mongodb');
 
 const scrapeESPN = async () => {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
+    const uri = 'mongodb://localhost:27017';
+    const client = new MongoClient(uri);
+
     try {
+        await client.connect();
+
+        const db = client.db('NCAAdata');
+        const collection = db.collection('NCAAstats');
+        await collection.deleteMany({});
+
         await page.goto('https://www.espn.com/mens-college-basketball/teams', { waitUntil: 'domcontentloaded'});
 
         const rosterLinks = await page.$$eval('.AnchorLink[href*="/team/roster/"]', (links) => {
@@ -16,8 +26,8 @@ const scrapeESPN = async () => {
         })
 
         for (let i = 0; i < rosterLinks.length; i++) {
-            if (teams[i] === 'Iowa State Cyclones') {
-                await getPlayers(browser, rosterLinks[i], teams[i]);
+            if (teams[i]) {
+                await getPlayers(browser, client, rosterLinks[i], teams[i]);
             }   
         }
     }
@@ -26,11 +36,13 @@ const scrapeESPN = async () => {
     }
     finally {
         await browser.close();
+        await client.close();
     }
 };
 
-const getPlayers = async ( browser, rosterLink, teamName ) => {
+const getPlayers = async ( browser, mongoDBclient, rosterLink, teamName ) => {
     const page = await browser.newPage();
+    const client = mongoDBclient
 
     try {
         await page.goto(rosterLink, { waitUntil: 'domcontentloaded'});
@@ -44,19 +56,22 @@ const getPlayers = async ( browser, rosterLink, teamName ) => {
         });
 
         for (let i = 0; i < playersLinks.length; i++) {
-            await getFreshman(browser, playersLinks[i], team);
+            await getStats(browser, client, playersLinks[i], team);
         }
 
     } catch (error) {
         console.log(error);
     }
     finally {
-        await page.close();
+        if (page && !page.isClosed()) {
+            await page.close();
+        }
     }
 }
 
-const getFreshman = async ( browser, playerLink, teamName ) => {
+const getStats = async ( browser, mongoDBclient, playerLink, teamName ) => {
     const page = await browser.newPage();
+    const client = mongoDBclient;
 
     try {
         await page.goto(playerLink, { waitUntil: 'domcontentloaded'});
@@ -67,11 +82,11 @@ const getFreshman = async ( browser, playerLink, teamName ) => {
 
         const team = teamName;
 
-        const isFreshman = await page.$eval('.fw-medium.clr-black', (player) => {
-            return player.innerText.includes("Freshman");
+        const grade = await page.$eval('.fw-medium.clr-black', (player) => {
+            return player.innerText.trim();
         });
 
-        if (isFreshman) {
+        if (grade.includes("")) {
             const playerStats = await page.$$eval('.clr-gray-02', (stats) => {
                 const trimmedStats = stats.map(stat => stat.innerText.trim());
                 if (trimmedStats.length == 0) {
@@ -82,18 +97,24 @@ const getFreshman = async ( browser, playerLink, teamName ) => {
 
             const playerData = {
                 name: name,
+                grade: grade,
                 team: team,
                 stats: playerStats
             };
 
             console.log(playerData);
+            const db = client.db('NCAAdata');
+            const collection = db.collection('NCAAstats');
+            await collection.insertOne(playerData);
         }  
     }
     catch(error) {
         console.log("error", error);
     }
     finally {
-        await page.close();
+        if (page && !page.isClosed()) {
+            await page.close();
+        }
     }
 }
 
