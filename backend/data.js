@@ -4,6 +4,7 @@ const { MongoClient } = require('mongodb');
 const scrapeESPN = async () => {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
+    //Make multipte pages
 
     const uri = 'mongodb://localhost:27017';
     const client = new MongoClient(uri);
@@ -19,7 +20,7 @@ const scrapeESPN = async () => {
 
         const rosterLinks = await page.$$eval('.AnchorLink[href*="/team/roster/"]', (links) => {
             return links.map((link) => link.href);
-        });
+        }); 
 
         const teams = await page.$$eval('.di.clr-gray-01.h5', (names) => {
             return names.map((name) => name.innerText.trim());
